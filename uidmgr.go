@@ -1,4 +1,4 @@
-package panos
+package gopanosapi
 
 import (
 	"encoding/xml"

@@ -1,5 +1,5 @@
 // Package panos provides an interface to the PANOS RESTful API by Palo Alto Networks
-package panos
+package gopanosapi
 
 import (
 	"crypto/tls"
