@@ -22,6 +22,8 @@ const _TYPE_REPORT = "report"
 const _TYPE_EXPORT = "export"
 const _ACTION_SET = "set"
 const _ACTION_GET = "get"
+
+//noinspection GoUnusedConst
 const _ACTION_TERMINATE = "terminate"
 const _comsError = "API_COMSERROR"
 const _comsErrorCode = "-1"
@@ -112,6 +114,13 @@ type reportJobResp struct {
 	Status  string    `xml:"status,attr"`
 	Job     jobResp   `xml:"result>job"`
 	Report  xmlResult `xml:"result>report"`
+}
+
+type reportResp struct {
+	XMLName xml.Name  `xml:"response"`
+	Status  string    `xml:"status,attr"`
+	Report  xmlResult `xml:"report"`
+	MsgNode string    `xml:"msg>line"`
 }
 
 func (apiC *ApiConnector) trace(message string) {
@@ -251,7 +260,7 @@ func (apiC *ApiConnector) Uid(payload string) ([]byte, error) {
 	}
 	xmlresponse, _ := ioutil.ReadAll(res.Body)
 	res.Body.Close()
-	apiC.trace("ApiConnector.Uid: response\n...\n" + string(xmlresponse)+"\n...\n")
+	apiC.trace("ApiConnector.Uid: response\n...\n" + string(xmlresponse) + "\n...\n")
 	apiC.LastUnmarshallError = xml.Unmarshal(xmlresponse, &uidResp)
 	if apiC.LastUnmarshallError != nil {
 		apiC.trace("ApiConnector.Uid: Error parsing last response")
@@ -284,7 +293,7 @@ func (apiC *ApiConnector) Op(cmd string) ([]byte, error) {
 	}
 	xmlresponse, _ := ioutil.ReadAll(res.Body)
 	res.Body.Close()
-	apiC.trace("ApiConnector.Op: response\n...\n" + string(xmlresponse)+"\n...\n")
+	apiC.trace("ApiConnector.Op: response\n...\n" + string(xmlresponse) + "\n...\n")
 	apiC.LastUnmarshallError = xml.Unmarshal(xmlresponse, &opResp)
 	if apiC.LastUnmarshallError != nil {
 		apiC.trace("ApiConnector.Op: Error parsing last response")
@@ -297,6 +306,7 @@ func (apiC *ApiConnector) Op(cmd string) ([]byte, error) {
 	return opResp.XmlData.XmlResult, nil
 }
 
+//noinspection GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst
 const (
 	CONFIG_SHOW = iota
 	CONFIG_GET
@@ -334,7 +344,7 @@ func (apiC *ApiConnector) Config(action int, xpathValue string, elementValue str
 	}
 	xmlresponse, _ := ioutil.ReadAll(res.Body)
 	res.Body.Close()
-	apiC.trace("ApiConnector.Config: response\n...\n" + string(xmlresponse)+"\n...\n")
+	apiC.trace("ApiConnector.Config: response\n...\n" + string(xmlresponse) + "\n...\n")
 	apiC.LastUnmarshallError = xml.Unmarshal(xmlresponse, &cfgResp)
 	if apiC.LastUnmarshallError != nil {
 		apiC.trace("ApiConnector.Op: Error parsing last response")
@@ -347,6 +357,7 @@ func (apiC *ApiConnector) Config(action int, xpathValue string, elementValue str
 	return cfgResp.XmlData.XmlResult, nil
 }
 
+//noinspection GoUnusedConst,GoUnusedConst
 const (
 	REPORT_DYNAMIC = iota
 	REPORT_PREDEFINED
@@ -355,23 +366,25 @@ const (
 
 var reportTypeMap = [...]string{"dynamic", "predefined", "custom"}
 
-// Report provides a low-level access to the configuration functions of a PANOS device.
-func (apiC *ApiConnector) Report(reportType int, reportName string, cmd string) ([]byte, error) {
+// Report provides a low-level access to the reporting functions of a PANOS device.
+func (apiC *ApiConnector) Report(reportType int, reportName string, cmd string, async bool) ([]byte, error) {
 	if apiC.apikey == "" {
 		return nil, apiC.reportUninit()
 	}
-	apiC.trace(fmt.Sprintf("ApiConnector.Report: called with reportType = %v, reportName = %v and cmd = %v",
-		reportTypeMap[reportType], reportName, cmd))
-	var jResp asyncResp
+	apiC.trace(fmt.Sprintf("ApiConnector.Report: called with reportType = %v, reportName = %v async = %v and cmd = %v",
+		reportTypeMap[reportType], reportName, async, cmd))
 	q := url.Values{}
 	q.Set("type", _TYPE_REPORT)
-	q.Add("async", "yes")
 	q.Add("reporttype", reportTypeMap[reportType])
 	if reportName == "" {
 		reportName = "custom-dynamic-report"
 	}
 	q.Add("reportname", reportName)
-
+	if async {
+		q.Add("async", "yes")
+	} else {
+		q.Add("async", "no")
+	}
 	if cmd != "" {
 		q.Add("cmd", cmd)
 	}
@@ -385,18 +398,35 @@ func (apiC *ApiConnector) Report(reportType int, reportName string, cmd string) 
 	}
 	xmlresponse, _ := ioutil.ReadAll(res.Body)
 	res.Body.Close()
-	apiC.trace("ApiConnector.Report: response\n...\n" + string(xmlresponse)+"\n...\n")
-	apiC.LastUnmarshallError = xml.Unmarshal(xmlresponse, &jResp)
-	if apiC.LastUnmarshallError != nil {
-		apiC.trace("ApiConnector.Report: Error parsing last response")
-		return nil, apiC.LastUnmarshallError
+	apiC.trace("ApiConnector.Report: response\n...\n" + string(xmlresponse) + "\n...\n")
+	var returnValue []byte
+	switch async {
+	case true:
+		var jResp asyncResp
+		apiC.LastUnmarshallError = xml.Unmarshal(xmlresponse, &jResp)
+		if apiC.LastUnmarshallError != nil {
+			apiC.trace("ApiConnector.Report: Error parsing last response")
+			return nil, apiC.LastUnmarshallError
+		}
+		apiC.LastStatus = jResp.Status
+		apiC.LastStatusCode = ""
+		apiC.LastResponseMessage = jResp.MsgNode
+		xmlJobResponse, _ := apiC.getReportJob(reportType, jResp.JobId, _ACTION_GET)
+		apiC.traceResponse()
+		returnValue = xmlJobResponse
+	case false:
+		var rResp reportResp
+		apiC.LastUnmarshallError = xml.Unmarshal(xmlresponse, &rResp)
+		if apiC.LastUnmarshallError != nil {
+			apiC.trace("ApiConnector.Report: Error parsing last response")
+			return nil, apiC.LastUnmarshallError
+		}
+		apiC.LastStatus = rResp.Status
+		apiC.LastStatusCode = ""
+		apiC.LastResponseMessage = rResp.MsgNode
+		returnValue = rResp.Report.XmlResult
 	}
-	apiC.LastStatus = jResp.Status
-	apiC.LastStatusCode = ""
-	apiC.LastResponseMessage = jResp.MsgNode
-	xmlJobResponse, _ := apiC.getReportJob(reportType, jResp.JobId, _ACTION_GET)
-	apiC.traceResponse()
-	return xmlJobResponse, nil
+	return returnValue, nil
 }
 
 const _statusFin = "FIN"
@@ -419,7 +449,7 @@ func (apiC *ApiConnector) getReportJob(reportType int, jobId string, action stri
 		}
 		xmlresponse, _ := ioutil.ReadAll(res.Body)
 		res.Body.Close()
-		apiC.trace("ApiConnector.getReportJob: response\n...\n" + string(xmlresponse)+"\n...\n")
+		apiC.trace("ApiConnector.getReportJob: response\n...\n" + string(xmlresponse) + "\n...\n")
 		apiC.LastUnmarshallError = xml.Unmarshal(xmlresponse, &reportJResp)
 		if apiC.LastUnmarshallError != nil {
 			apiC.trace("ApiConnector.getReportJob: Error parsing last response")
@@ -434,6 +464,7 @@ func (apiC *ApiConnector) getReportJob(reportType int, jobId string, action stri
 	return []byte("<report>" + string(reportJResp.Report.XmlResult) + "</report>"), nil
 }
 
+//noinspection GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst,GoUnusedConst
 const (
 	EXPORT_CERTIFICATE = iota
 	EXPORT_HIGH_AVAILABILITY_KEY
